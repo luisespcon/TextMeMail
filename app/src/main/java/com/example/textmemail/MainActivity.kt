@@ -1,5 +1,6 @@
 package com.example.textmemail
 
+import android.content.Context
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -8,16 +9,42 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.preferencesDataStore
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import auth.EmailAuthManager
 import com.example.textmemail.ui_auth.AuthEmailScreen
 import com.example.textmemail.ui_auth.VerifyAndManageScreen
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
+import java.util.Locale
+
+// ---------- DataStore (idioma) ----------
+private val Context.dataStore by preferencesDataStore(name = "settings")
+private val KEY_LANG = stringPreferencesKey("language")
+private const val DEFAULT_LANG = "es"
+
+// Aplica el locale a la actividad
+private fun setAppLocale(activity: ComponentActivity, langTag: String) {
+    val locale = Locale.forLanguageTag(langTag)
+    Locale.setDefault(locale)
+    val cfg = activity.resources.configuration
+    cfg.setLocale(locale)
+    activity.createConfigurationContext(cfg)
+    activity.resources.updateConfiguration(cfg, activity.resources.displayMetrics)
+}
 
 class MainActivity : ComponentActivity() {
 
     private val auth by lazy { FirebaseAuth.getInstance() }
-    private val emailAuth by lazy { EmailAuthManager(auth) }
+    private val emailAuth by lazy { EmailAuthManager(auth, FirebaseFirestore.getInstance()) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -26,18 +53,50 @@ class MainActivity : ComponentActivity() {
             var isLoggedIn by remember { mutableStateOf(auth.currentUser != null) }
             var isVerified by remember { mutableStateOf(auth.currentUser?.isEmailVerified == true) }
             var currentEmail by remember { mutableStateOf(auth.currentUser?.email ?: "") }
-            var currentLanguage by remember { mutableStateOf("es") } // (puedes leerlo de Firestore tras login verificado)
 
-            // Listener de auth
+            var currentLanguage by remember { mutableStateOf(DEFAULT_LANG) }
+            var currentRole by remember { mutableStateOf("user") }
+            var showSettings by remember { mutableStateOf(false) }
+
+            // Observa DataStore y aplica locale cuando cambie (refresca estados de UI)
+            LaunchedEffect(Unit) {
+                lifecycleScope.launch {
+                    repeatOnLifecycle(Lifecycle.State.STARTED) {
+                        applicationContext.dataStore.data
+                            .map { it[KEY_LANG] ?: DEFAULT_LANG }
+                            .collect { lang ->
+                                setAppLocale(this@MainActivity, lang)
+                                currentLanguage = lang
+                            }
+                    }
+                }
+            }
+
+            // Listener de Auth
             DisposableEffect(Unit) {
-                val listener = FirebaseAuth.AuthStateListener { fa ->
+                val l = FirebaseAuth.AuthStateListener { fa ->
                     val u = fa.currentUser
                     isLoggedIn = u != null
                     isVerified = u?.isEmailVerified == true
                     currentEmail = u?.email ?: ""
+                    if (u == null) {
+                        showSettings = false
+                        currentRole = "user"
+                    }
                 }
-                auth.addAuthStateListener(listener)
-                onDispose { auth.removeAuthStateListener(listener) }
+                auth.addAuthStateListener(l)
+                onDispose { auth.removeAuthStateListener(l) }
+            }
+
+            // Si ya está logueado y verificado, trae el rol de Firestore
+            LaunchedEffect(isLoggedIn, isVerified) {
+                if (isLoggedIn && isVerified) {
+                    emailAuth.getCurrentUserRole { ok, role, _ ->
+                        currentRole = if (ok && !role.isNullOrBlank()) role!! else "user"
+                    }
+                } else {
+                    currentRole = "user"
+                }
             }
 
             MaterialTheme {
@@ -49,20 +108,23 @@ class MainActivity : ComponentActivity() {
                                 onRegister = { name, email, pass, lang, done ->
                                     emailAuth.register(name, email, pass, lang) { ok, msg ->
                                         if (ok) {
-                                            currentLanguage = lang
+                                            // Se guardó en Firestore; persistimos local y RECREAMOS para fijar el idioma global
+                                            applyLanguage(lang, recreate = true)
                                         }
                                         done(ok, msg)
                                     }
                                 },
                                 onLogin = { email, pass, done ->
-                                    emailAuth.login(email, pass) { ok, msg ->
-                                        done(ok, msg)
-                                    }
+                                    emailAuth.login(email, pass) { ok, msg -> done(ok, msg) }
+                                },
+                                onLanguageChanged = { lang ->
+                                    // Cambia el idioma del formulario en caliente (sin recrear)
+                                    applyLanguage(lang, recreate = false)
                                 }
                             )
                         }
                         isLoggedIn && !isVerified -> {
-                            // Registrado / logueado pero sin verificar: pantalla de verificación y gestión
+                            // Verificación de correo y gestión básica
                             VerifyAndManageScreen(
                                 currentEmail = currentEmail,
                                 currentLanguage = currentLanguage,
@@ -75,7 +137,7 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onUpdateLanguage = { newLang, cb ->
                                     emailAuth.updateLanguage(newLang) { ok, msg ->
-                                        if (ok) currentLanguage = newLang
+                                        if (ok) applyLanguage(newLang, recreate = true)
                                         cb(ok, msg)
                                     }
                                 },
@@ -90,21 +152,54 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                         else -> {
-                            // Verificado: Home
-                            HomeScreen(
-                                email = currentEmail,
-                                onSignOut = { emailAuth.signOut() }
-                            )
+                            // Home + Ajustes
+                            if (showSettings) {
+                                SettingsScreen(
+                                    currentLanguage = currentLanguage,
+                                    onSave = { lang ->
+                                        // 1) Actualiza remoto (no bloquea)
+                                        emailAuth.updateLanguage(lang) { _, _ -> }
+                                        // 2) Aplica local + RECREATE para refrescar toda la app
+                                        applyLanguage(lang, recreate = true)
+                                    },
+                                    onClose = { showSettings = false }
+                                )
+                            } else {
+                                HomeScreen(
+                                    email = currentEmail,
+                                    role = currentRole,
+                                    onOpenSettings = { showSettings = true },
+                                    onSignOut = { emailAuth.signOut() }
+                                )
+                            }
                         }
                     }
                 }
             }
         }
     }
+
+    /**
+     * Persiste idioma en DataStore, aplica Locale y opcionalmente recrea la actividad.
+     * - recreate=false: útil en formulario de login/registro para no “saltar” de pantalla.
+     * - recreate=true : cuando ya estás autenticado / verificado o en Ajustes.
+     */
+    private fun applyLanguage(lang: String, recreate: Boolean) {
+        lifecycleScope.launch {
+            applicationContext.dataStore.edit { it[KEY_LANG] = lang }
+            setAppLocale(this@MainActivity, lang)
+            if (recreate) this@MainActivity.recreate()
+        }
+    }
 }
 
 @Composable
-private fun HomeScreen(email: String, onSignOut: () -> Unit) {
+private fun HomeScreen(
+    email: String,
+    role: String,
+    onOpenSettings: () -> Unit,
+    onSignOut: () -> Unit
+) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -112,10 +207,50 @@ private fun HomeScreen(email: String, onSignOut: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Text("Sesión iniciada (verificado)", style = MaterialTheme.typography.headlineSmall)
+        Text(stringResource(R.string.signed_in_verified), style = MaterialTheme.typography.headlineSmall)
         Spacer(Modifier.height(8.dp))
-        Text(if (email.isNotBlank()) email else "(sin correo)")
+        Text(if (email.isNotBlank()) email else "(—)")
+        Spacer(Modifier.height(8.dp))
+        Text("${stringResource(R.string.role)}: ${role.ifBlank { "user" }}")
         Spacer(Modifier.height(24.dp))
-        Button(onClick = onSignOut) { Text("Cerrar sesión") }
+
+        OutlinedButton(onClick = onOpenSettings, modifier = Modifier.fillMaxWidth()) {
+            Text(stringResource(R.string.settings))
+        }
+        Spacer(Modifier.height(12.dp))
+        Button(onClick = onSignOut, modifier = Modifier.fillMaxWidth()) {
+            Text(stringResource(R.string.sign_out))
+        }
+    }
+}
+
+@Composable
+private fun SettingsScreen(
+    currentLanguage: String,
+    onSave: (String) -> Unit,
+    onClose: () -> Unit
+) {
+    var lang by remember { mutableStateOf(currentLanguage) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        Text(stringResource(R.string.settings), style = MaterialTheme.typography.headlineSmall)
+
+        Text(stringResource(R.string.language))
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            FilterChip(selected = lang == "es", onClick = { lang = "es" }, label = { Text("ES") })
+            FilterChip(selected = lang == "en", onClick = { lang = "en" }, label = { Text("EN") })
+        }
+
+        Button(onClick = { onSave(lang) }, modifier = Modifier.fillMaxWidth()) {
+            Text(stringResource(R.string.save))
+        }
+        TextButton(onClick = onClose) {
+            Text(stringResource(R.string.back))
+        }
     }
 }

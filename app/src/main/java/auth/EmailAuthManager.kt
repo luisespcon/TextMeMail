@@ -7,7 +7,8 @@ import com.google.firebase.firestore.FirebaseFirestore
 data class UserProfile(
     val name: String,
     val language: String, // "es" | "en"
-    val email: String
+    val email: String,
+    val role: String = "user"
 )
 
 class EmailAuthManager(
@@ -48,11 +49,12 @@ class EmailAuthManager(
                 // Enviar verificación
                 user.sendEmailVerification()
 
-                // Guardar perfil en Firestore
+                // Guardar perfil en Firestore con rol por default = "user"
                 val doc = mapOf(
                     "name" to name,
                     "language" to language,
                     "email" to email,
+                    "role" to "user",
                     "createdAt" to FieldValue.serverTimestamp(),
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
@@ -92,6 +94,23 @@ class EmailAuthManager(
             }
     }
 
+    /** Obtener rol actual desde Firestore */
+    fun getCurrentUserRole(done: (ok: Boolean, role: String?, message: String) -> Unit) {
+        val uid = auth.currentUser?.uid ?: return done(false, null, "Sin usuario.")
+        db.collection("users").document(uid).get()
+            .addOnSuccessListener { snap ->
+                if (snap.exists()) {
+                    val role = snap.getString("role") ?: "user"
+                    done(true, role, "Rol obtenido: $role")
+                } else {
+                    done(false, null, "Perfil no encontrado.")
+                }
+            }
+            .addOnFailureListener { e ->
+                done(false, null, e.localizedMessage ?: "Error al leer rol.")
+            }
+    }
+
     /** Reenviar verificación de email */
     fun resendVerification(done: (ok: Boolean, message: String) -> Unit) {
         val user = auth.currentUser
@@ -112,10 +131,19 @@ class EmailAuthManager(
     /** Cambiar idioma en Firestore */
     fun updateLanguage(newLanguage: String, done: (ok: Boolean, message: String) -> Unit) {
         val uid = auth.currentUser?.uid ?: return done(false, "Sin usuario.")
+
+        val data = mapOf(
+            "language" to newLanguage,
+            "updatedAt" to FieldValue.serverTimestamp()
+        )
+
+        // Crea el doc si no existe, o actualiza si ya existe
         db.collection("users").document(uid)
-            .update(mapOf("language" to newLanguage, "updatedAt" to FieldValue.serverTimestamp()))
+            .set(data, com.google.firebase.firestore.SetOptions.merge())
             .addOnSuccessListener { done(true, "Idioma actualizado.") }
-            .addOnFailureListener { e -> done(false, e.localizedMessage ?: "No se pudo actualizar idioma.") }
+            .addOnFailureListener { e ->
+                done(false, e.localizedMessage ?: "No se pudo actualizar idioma.")
+            }
     }
 
     /** Cambiar email en Auth (puede pedir re-auth en algunos casos) */

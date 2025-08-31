@@ -1,3 +1,4 @@
+// Interfaz compose para login y registro de usuario
 package com.example.textmemail.ui_auth
 
 import androidx.compose.foundation.layout.*
@@ -17,7 +18,9 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun AuthEmailScreen(
     onRegister: (name: String, email: String, password: String, language: String, done: (Boolean, String) -> Unit) -> Unit,
-    onLogin: (email: String, password: String, done: (Boolean, String) -> Unit) -> Unit
+    onLogin: (email: String, password: String, done: (Boolean, String) -> Unit) -> Unit,
+    // NUEVO: se llama cada vez que el usuario toca ES/EN en Registrar
+    onLanguageChanged: (String) -> Unit = {}
 ) {
     var mode by remember { mutableStateOf(AuthMode.Login) }
 
@@ -58,7 +61,7 @@ fun AuthEmailScreen(
             )
             Spacer(Modifier.height(12.dp))
 
-            // Selector simple de idioma
+            // Selector de idioma con cambio inmediato
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -67,12 +70,18 @@ fun AuthEmailScreen(
                 Text("Idioma:")
                 FilterChip(
                     selected = language == "es",
-                    onClick = { language = "es" },
+                    onClick = {
+                        language = "es"
+                        onLanguageChanged("es")   // << cambia UI + guarda en DataStore fuera
+                    },
                     label = { Text("ES") }
                 )
                 FilterChip(
                     selected = language == "en",
-                    onClick = { language = "en" },
+                    onClick = {
+                        language = "en"
+                        onLanguageChanged("en")
+                    },
                     label = { Text("EN") }
                 )
             }

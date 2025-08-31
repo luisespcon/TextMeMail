@@ -62,5 +62,8 @@ dependencies {
     implementation(platform("com.google.firebase:firebase-bom:33.1.2"))
     implementation("com.google.firebase:firebase-auth")
     implementation("com.google.firebase:firebase-firestore") // ← Firestore
-    implementation("androidx.compose.material:material-icons-extended") // ojito
+    implementation("androidx.compose.material:material-icons-extended") // ojitoimplementation("androidx.datastore:datastore-preferences:1.1.1")
+    implementation("androidx.appcompat:appcompat:1.7.0")
+    implementation("androidx.datastore:datastore-preferences:1.1.1")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.4")
 }

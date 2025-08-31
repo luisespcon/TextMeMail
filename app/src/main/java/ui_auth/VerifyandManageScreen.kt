@@ -1,3 +1,5 @@
+//Interfaz posterior a registro para la validación del email
+
 package com.example.textmemail.ui_auth
 
 import androidx.compose.foundation.layout.*
