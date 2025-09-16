@@ -1,3 +1,4 @@
+// app/src/main/java/com/example/textmemail/MainActivity.kt
 package com.example.textmemail
 
 import android.content.Context
@@ -20,6 +21,10 @@ import androidx.lifecycle.repeatOnLifecycle
 import auth.EmailAuthManager
 import com.example.textmemail.ui_auth.AuthEmailScreen
 import com.example.textmemail.ui_auth.VerifyAndManageScreen
+import com.example.textmemail.ui_chat.ChatScreen
+import com.example.textmemail.ui_chat.ContactsScreen
+import com.example.textmemail.models.Contact
+import com.example.textmemail.models.Message
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.flow.map
@@ -31,7 +36,6 @@ private val Context.dataStore by preferencesDataStore(name = "settings")
 private val KEY_LANG = stringPreferencesKey("language")
 private const val DEFAULT_LANG = "es"
 
-// Aplica el locale a la actividad
 private fun setAppLocale(activity: ComponentActivity, langTag: String) {
     val locale = Locale.forLanguageTag(langTag)
     Locale.setDefault(locale)
@@ -56,9 +60,16 @@ class MainActivity : ComponentActivity() {
 
             var currentLanguage by remember { mutableStateOf(DEFAULT_LANG) }
             var currentRole by remember { mutableStateOf("user") }
-            var showSettings by remember { mutableStateOf(false) }
 
-            // Observa DataStore y aplica locale cuando cambie (refresca estados de UI)
+            var showSettings by remember { mutableStateOf(false) }
+            var showContacts by remember { mutableStateOf(false) }
+            var selectedContact by remember { mutableStateOf<Contact?>(null) }
+
+            var contacts by remember { mutableStateOf(listOf<Contact>()) }
+
+            val db = FirebaseFirestore.getInstance()
+
+            // Observa DataStore
             LaunchedEffect(Unit) {
                 lifecycleScope.launch {
                     repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -81,6 +92,8 @@ class MainActivity : ComponentActivity() {
                     currentEmail = u?.email ?: ""
                     if (u == null) {
                         showSettings = false
+                        showContacts = false
+                        selectedContact = null
                         currentRole = "user"
                     }
                 }
@@ -88,14 +101,77 @@ class MainActivity : ComponentActivity() {
                 onDispose { auth.removeAuthStateListener(l) }
             }
 
-            // Si ya está logueado y verificado, trae el rol de Firestore
+            // Si ya está logueado y verificado, trae el rol y los usuarios
             LaunchedEffect(isLoggedIn, isVerified) {
                 if (isLoggedIn && isVerified) {
+                    // Migrar usuario si es necesario
+                    emailAuth.migrateExistingUser { _, _ -> /* ignorar resultado */ }
+                    
                     emailAuth.getCurrentUserRole { ok, role, _ ->
                         currentRole = if (ok && !role.isNullOrBlank()) role!! else "user"
                     }
+
+                    // Cargar usuarios válidos como contactos
+                    db.collection("users").addSnapshotListener { snaps, _ ->
+                        if (snaps != null) {
+                            println("DEBUG: Total documentos encontrados: ${snaps.documents.size}")
+                            contacts = snaps.documents.mapNotNull { doc ->
+                                val email = doc.getString("email") ?: return@mapNotNull null
+                                val name = doc.getString("name") ?: ""
+                                val role = doc.getString("role") ?: "user"
+                                val createdAt = doc.getTimestamp("createdAt")
+                                val isEmailVerified = doc.getBoolean("isEmailVerified")
+                                
+                                println("DEBUG: Usuario encontrado - Email: $email, Name: $name, Role: $role, IsVerified: $isEmailVerified, CreatedAt: $createdAt")
+                                
+                                // Filtros para mostrar solo usuarios válidos:
+                                // 1. No mostrarse a sí mismo
+                                // 2. Debe tener email válido
+                                // 3. Debe tener un rol definido
+                                // 4. Debe tener un nombre válido (no vacío)
+                                // 5. No debe ser email de prueba
+                                // 6. Si el campo isEmailVerified existe, debe ser true
+                                //    Si no existe el campo, se considera válido (usuarios antiguos)
+                                val isVerified = isEmailVerified ?: true // null = usuario antiguo = válido
+                                
+                                // Filtros para excluir usuarios de prueba
+                                val isTestEmail = email.contains("prueba", ignoreCase = true) || 
+                                                 email.contains("test", ignoreCase = true) ||
+                                                 email.contains("demo", ignoreCase = true) ||
+                                                 name.contains("prueba", ignoreCase = true) ||
+                                                 name.contains("test", ignoreCase = true)
+                                
+                                val isCurrentUser = email == currentEmail
+                                val hasValidName = name.isNotBlank() && name.length > 1
+                                val hasValidEmail = email.isNotBlank() && email.contains("@")
+                                val hasValidRole = role.isNotBlank()
+                                
+                                println("DEBUG: Filtros - isCurrentUser: $isCurrentUser, hasValidName: $hasValidName, hasValidEmail: $hasValidEmail, hasValidRole: $hasValidRole, isVerified: $isVerified, isTestEmail: $isTestEmail")
+                                
+                                if (!isCurrentUser && 
+                                    hasValidEmail && 
+                                    hasValidRole &&
+                                    hasValidName &&
+                                    !isTestEmail &&
+                                    isVerified) {
+                                    
+                                    println("DEBUG: Usuario ACEPTADO como contacto: $email")
+                                    Contact(
+                                        uid = doc.id,
+                                        name = name,
+                                        email = email
+                                    )
+                                } else {
+                                    println("DEBUG: Usuario RECHAZADO: $email - Razón: ${if (isCurrentUser) "es usuario actual" else if (!hasValidEmail) "email inválido" else if (!hasValidRole) "rol inválido" else if (!hasValidName) "nombre inválido" else if (isTestEmail) "es usuario de prueba" else if (!isVerified) "no verificado" else "unknown"}")
+                                    null
+                                }
+                            }
+                            println("DEBUG: Total contactos finales: ${contacts.size}")
+                        }
+                    }
                 } else {
                     currentRole = "user"
+                    contacts = emptyList() // Limpiar contactos si no está verificado
                 }
             }
 
@@ -103,12 +179,10 @@ class MainActivity : ComponentActivity() {
                 Surface(Modifier.fillMaxSize()) {
                     when {
                         !isLoggedIn -> {
-                            // Pantalla de login/registro
                             AuthEmailScreen(
                                 onRegister = { name, email, pass, lang, done ->
                                     emailAuth.register(name, email, pass, lang) { ok, msg ->
                                         if (ok) {
-                                            // Se guardó en Firestore; persistimos local y RECREAMOS para fijar el idioma global
                                             applyLanguage(lang, recreate = true)
                                         }
                                         done(ok, msg)
@@ -118,13 +192,11 @@ class MainActivity : ComponentActivity() {
                                     emailAuth.login(email, pass) { ok, msg -> done(ok, msg) }
                                 },
                                 onLanguageChanged = { lang ->
-                                    // Cambia el idioma del formulario en caliente (sin recrear)
                                     applyLanguage(lang, recreate = false)
                                 }
                             )
                         }
                         isLoggedIn && !isVerified -> {
-                            // Verificación de correo y gestión básica
                             VerifyAndManageScreen(
                                 currentEmail = currentEmail,
                                 currentLanguage = currentLanguage,
@@ -152,25 +224,42 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                         else -> {
-                            // Home + Ajustes
-                            if (showSettings) {
-                                SettingsScreen(
-                                    currentLanguage = currentLanguage,
-                                    onSave = { lang ->
-                                        // 1) Actualiza remoto (no bloquea)
-                                        emailAuth.updateLanguage(lang) { _, _ -> }
-                                        // 2) Aplica local + RECREATE para refrescar toda la app
-                                        applyLanguage(lang, recreate = true)
-                                    },
-                                    onClose = { showSettings = false }
-                                )
-                            } else {
-                                HomeScreen(
-                                    email = currentEmail,
-                                    role = currentRole,
-                                    onOpenSettings = { showSettings = true },
-                                    onSignOut = { emailAuth.signOut() }
-                                )
+                            when {
+                                showSettings -> {
+                                    SettingsScreen(
+                                        currentLanguage = currentLanguage,
+                                        onSave = { lang: String ->
+                                            emailAuth.updateLanguage(lang) { _, _ -> }
+                                            applyLanguage(lang, recreate = true)
+                                        },
+                                        onClose = { showSettings = false }
+                                    )
+                                }
+                                showContacts -> {
+                                    ContactsScreen(
+                                        contacts = contacts,
+                                        onBack = { showContacts = false },
+                                        onOpenChat = { contact ->
+                                            selectedContact = contact
+                                            showContacts = false
+                                        }
+                                    )
+                                }
+                                selectedContact != null -> {
+                                    ChatScreen(
+                                        contact = selectedContact!!,
+                                        onBack = { selectedContact = null }
+                                    )
+                                }
+                                else -> {
+                                    HomeScreen(
+                                        email = currentEmail,
+                                        role = currentRole,
+                                        onOpenSettings = { showSettings = true },
+                                        onSignOut = { emailAuth.signOut() },
+                                        onOpenContacts = { showContacts = true }
+                                    )
+                                }
                             }
                         }
                     }
@@ -179,11 +268,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /**
-     * Persiste idioma en DataStore, aplica Locale y opcionalmente recrea la actividad.
-     * - recreate=false: útil en formulario de login/registro para no “saltar” de pantalla.
-     * - recreate=true : cuando ya estás autenticado / verificado o en Ajustes.
-     */
     private fun applyLanguage(lang: String, recreate: Boolean) {
         lifecycleScope.launch {
             applicationContext.dataStore.edit { it[KEY_LANG] = lang }
@@ -198,7 +282,8 @@ private fun HomeScreen(
     email: String,
     role: String,
     onOpenSettings: () -> Unit,
-    onSignOut: () -> Unit
+    onSignOut: () -> Unit,
+    onOpenContacts: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -220,6 +305,10 @@ private fun HomeScreen(
         Spacer(Modifier.height(12.dp))
         Button(onClick = onSignOut, modifier = Modifier.fillMaxWidth()) {
             Text(stringResource(R.string.sign_out))
+        }
+        Spacer(Modifier.height(12.dp))
+        Button(onClick = onOpenContacts, modifier = Modifier.fillMaxWidth()) {
+            Text("Contactos")
         }
     }
 }

@@ -3,6 +3,7 @@ package auth
 import com.google.firebase.auth.*
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.SetOptions
 
 data class UserProfile(
     val name: String,
@@ -49,17 +50,18 @@ class EmailAuthManager(
                 // Enviar verificación
                 user.sendEmailVerification()
 
-                // Guardar perfil en Firestore con rol por default = "user"
+                // Guardar perfil en Firestore bajo /users/{uid}
                 val doc = mapOf(
                     "name" to name,
                     "language" to language,
                     "email" to email,
                     "role" to "user",
+                    "isEmailVerified" to false, // Se marcará como true cuando verifique
                     "createdAt" to FieldValue.serverTimestamp(),
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
                 db.collection("users").document(user.uid)
-                    .set(doc)
+                    .set(doc, SetOptions.merge()) // <- asegura merge si ya existe
                     .addOnSuccessListener {
                         done(true, "Cuenta creada. Revisa tu correo para verificar.")
                     }
@@ -82,6 +84,18 @@ class EmailAuthManager(
         auth.signInWithEmailAndPassword(email, password)
             .addOnCompleteListener { t ->
                 if (t.isSuccessful) {
+                    // Asegura que el perfil esté creado/actualizado
+                    val user = auth.currentUser
+                    if (user != null) {
+                        db.collection("users").document(user.uid)
+                            .set(
+                                mapOf(
+                                    "email" to user.email,
+                                    "isEmailVerified" to user.isEmailVerified, // Actualizar estado de verificación
+                                    "updatedAt" to FieldValue.serverTimestamp()
+                                ), SetOptions.merge()
+                            )
+                    }
                     done(true, "Inicio de sesión OK.")
                 } else {
                     val msg = when (val e = t.exception) {
@@ -124,7 +138,20 @@ class EmailAuthManager(
     fun reloadAndIsVerified(done: (verified: Boolean) -> Unit) {
         val user = auth.currentUser ?: return done(false)
         user.reload().addOnCompleteListener {
-            done(auth.currentUser?.isEmailVerified == true)
+            val isVerified = auth.currentUser?.isEmailVerified == true
+            
+            // Actualizar estado en Firestore si está verificado
+            if (isVerified) {
+                db.collection("users").document(user.uid)
+                    .set(
+                        mapOf(
+                            "isEmailVerified" to true,
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        ), SetOptions.merge()
+                    )
+            }
+            
+            done(isVerified)
         }
     }
 
@@ -137,24 +164,28 @@ class EmailAuthManager(
             "updatedAt" to FieldValue.serverTimestamp()
         )
 
-        // Crea el doc si no existe, o actualiza si ya existe
         db.collection("users").document(uid)
-            .set(data, com.google.firebase.firestore.SetOptions.merge())
+            .set(data, SetOptions.merge())
             .addOnSuccessListener { done(true, "Idioma actualizado.") }
             .addOnFailureListener { e ->
                 done(false, e.localizedMessage ?: "No se pudo actualizar idioma.")
             }
     }
 
-    /** Cambiar email en Auth (puede pedir re-auth en algunos casos) */
+    /** Cambiar email en Auth y Firestore */
     fun updateEmail(newEmail: String, done: (ok: Boolean, message: String) -> Unit) {
         val user = auth.currentUser ?: return done(false, "Sin usuario.")
         if (!newEmail.isValidEmail()) { done(false, "Correo inválido."); return }
         user.updateEmail(newEmail)
             .addOnSuccessListener {
-                // actualizar Firestore también
                 db.collection("users").document(user.uid)
-                    .update(mapOf("email" to newEmail, "updatedAt" to FieldValue.serverTimestamp()))
+                    .set(
+                        mapOf(
+                            "email" to newEmail,
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        ),
+                        SetOptions.merge()
+                    )
                 done(true, "Correo actualizado.")
             }
             .addOnFailureListener { e ->
@@ -171,6 +202,41 @@ class EmailAuthManager(
     }
 
     fun signOut() = auth.signOut()
+
+    /** Migrar usuarios existentes sin el campo isEmailVerified */
+    fun migrateExistingUser(done: (ok: Boolean, message: String) -> Unit) {
+        val user = auth.currentUser ?: return done(false, "Sin usuario.")
+        
+        db.collection("users").document(user.uid).get()
+            .addOnSuccessListener { doc ->
+                if (doc.exists()) {
+                    val isEmailVerified = doc.getBoolean("isEmailVerified")
+                    if (isEmailVerified == null) {
+                        // Usuario sin el campo, actualizarlo
+                        db.collection("users").document(user.uid)
+                            .set(
+                                mapOf(
+                                    "isEmailVerified" to user.isEmailVerified,
+                                    "updatedAt" to FieldValue.serverTimestamp()
+                                ), SetOptions.merge()
+                            )
+                            .addOnSuccessListener { 
+                                done(true, "Usuario migrado correctamente.")
+                            }
+                            .addOnFailureListener { e ->
+                                done(false, "Error migrando usuario: ${e.localizedMessage}")
+                            }
+                    } else {
+                        done(true, "Usuario ya tiene el campo actualizado.")
+                    }
+                } else {
+                    done(false, "Perfil de usuario no encontrado.")
+                }
+            }
+            .addOnFailureListener { e ->
+                done(false, "Error verificando usuario: ${e.localizedMessage}")
+            }
+    }
 }
 
 private fun String.isValidEmail(): Boolean =
