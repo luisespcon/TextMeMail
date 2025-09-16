@@ -66,4 +66,8 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.datastore:datastore-preferences:1.1.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.4")
+    
+    // Agora Video SDK para videochat
+    implementation("io.agora.rtc:full-sdk:4.3.2")
+    implementation("androidx.constraintlayout:constraintlayout:2.1.4")
 }
