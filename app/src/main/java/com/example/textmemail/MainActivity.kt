@@ -103,18 +103,34 @@ class MainActivity : ComponentActivity() {
 
             // Si ya está logueado y verificado, trae el rol y los usuarios
             LaunchedEffect(isLoggedIn, isVerified) {
+                println("DEBUG MAIN: isLoggedIn=$isLoggedIn, isVerified=$isVerified, currentEmail=$currentEmail")
+                
                 if (isLoggedIn && isVerified) {
-                    // Migrar usuario si es necesario
-                    emailAuth.migrateExistingUser { _, _ -> /* ignorar resultado */ }
+                    println("DEBUG MAIN: Usuario logueado y verificado, iniciando carga de datos...")
                     
-                    emailAuth.getCurrentUserRole { ok, role, _ ->
+                    // Migrar usuario si es necesario
+                    emailAuth.migrateExistingUser { ok, msg -> 
+                        println("DEBUG MAIN: Migración usuario - ok=$ok, msg=$msg")
+                    }
+                    
+                    emailAuth.getCurrentUserRole { ok, role, msg ->
+                        println("DEBUG MAIN: Rol obtenido - ok=$ok, role=$role, msg=$msg")
                         currentRole = if (ok && !role.isNullOrBlank()) role!! else "user"
                     }
 
                     // Cargar usuarios válidos como contactos
-                    db.collection("users").addSnapshotListener { snaps, _ ->
+                    db.collection("users").addSnapshotListener { snaps, error ->
+                        println("DEBUG CONTACTS: Listener activado - snaps=${snaps?.size()}, error=$error")
+                        
+                        if (error != null) {
+                            println("DEBUG CONTACTS: ERROR en listener: ${error.message}")
+                            return@addSnapshotListener
+                        }
+                        
                         if (snaps != null) {
-                            println("DEBUG: Total documentos encontrados: ${snaps.documents.size}")
+                            println("DEBUG CONTACTS: Total documentos encontrados: ${snaps.documents.size}")
+                            println("DEBUG CONTACTS: CurrentEmail para filtrar: $currentEmail")
+                            
                             contacts = snaps.documents.mapNotNull { doc ->
                                 val email = doc.getString("email") ?: return@mapNotNull null
                                 val name = doc.getString("name") ?: ""
@@ -122,7 +138,7 @@ class MainActivity : ComponentActivity() {
                                 val createdAt = doc.getTimestamp("createdAt")
                                 val isEmailVerified = doc.getBoolean("isEmailVerified")
                                 
-                                println("DEBUG: Usuario encontrado - Email: $email, Name: $name, Role: $role, IsVerified: $isEmailVerified, CreatedAt: $createdAt")
+                                println("DEBUG CONTACTS: Usuario encontrado - Email: $email, Name: $name, Role: $role, IsVerified: $isEmailVerified, CreatedAt: $createdAt")
                                 
                                 // Filtros para mostrar solo usuarios válidos:
                                 // 1. No mostrarse a sí mismo
@@ -146,7 +162,7 @@ class MainActivity : ComponentActivity() {
                                 val hasValidEmail = email.isNotBlank() && email.contains("@")
                                 val hasValidRole = role.isNotBlank()
                                 
-                                println("DEBUG: Filtros - isCurrentUser: $isCurrentUser, hasValidName: $hasValidName, hasValidEmail: $hasValidEmail, hasValidRole: $hasValidRole, isVerified: $isVerified, isTestEmail: $isTestEmail")
+                                println("DEBUG CONTACTS: Filtros - isCurrentUser: $isCurrentUser, hasValidName: $hasValidName, hasValidEmail: $hasValidEmail, hasValidRole: $hasValidRole, isVerified: $isVerified, isTestEmail: $isTestEmail")
                                 
                                 if (!isCurrentUser && 
                                     hasValidEmail && 
@@ -155,18 +171,21 @@ class MainActivity : ComponentActivity() {
                                     !isTestEmail &&
                                     isVerified) {
                                     
-                                    println("DEBUG: Usuario ACEPTADO como contacto: $email")
+                                    println("DEBUG CONTACTS: Usuario ACEPTADO como contacto: $email")
                                     Contact(
                                         uid = doc.id,
                                         name = name,
                                         email = email
                                     )
                                 } else {
-                                    println("DEBUG: Usuario RECHAZADO: $email - Razón: ${if (isCurrentUser) "es usuario actual" else if (!hasValidEmail) "email inválido" else if (!hasValidRole) "rol inválido" else if (!hasValidName) "nombre inválido" else if (isTestEmail) "es usuario de prueba" else if (!isVerified) "no verificado" else "unknown"}")
+                                    println("DEBUG CONTACTS: Usuario RECHAZADO: $email - Razón: ${if (isCurrentUser) "es usuario actual" else if (!hasValidEmail) "email inválido" else if (!hasValidRole) "rol inválido" else if (!hasValidName) "nombre inválido" else if (isTestEmail) "es usuario de prueba" else if (!isVerified) "no verificado" else "unknown"}")
                                     null
                                 }
                             }
-                            println("DEBUG: Total contactos finales: ${contacts.size}")
+                            println("DEBUG CONTACTS: Total contactos finales: ${contacts.size}")
+                            println("DEBUG CONTACTS: Lista contactos: ${contacts.map { "${it.name}(${it.email})" }}")
+                        } else {
+                            println("DEBUG CONTACTS: snaps es null")
                         }
                     }
                 } else {
