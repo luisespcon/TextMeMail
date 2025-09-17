@@ -160,28 +160,46 @@ class VideoCallActivity : AppCompatActivity() {
 
     private fun initializeEngine() {
         try {
+            println("🚀 INICIANDO VIDEOLLAMADA:")
+            println("   - App ID: $appId")
+            println("   - Channel: $channelName")
+            println("   - Token: ${if (token.isEmpty()) "SIN TOKEN" else "CON TOKEN"}")
+            
             val config = RtcEngineConfig().apply {
                 mContext = baseContext
                 mAppId = appId
                 mEventHandler = mRtcEventHandler
             }
+            
+            println("✅ Config creado, inicializando RtcEngine...")
             mRtcEngine = RtcEngine.create(config)
+            println("✅ RtcEngine creado")
+            
             mRtcEngine?.enableVideo()
+            println("✅ Video habilitado")
+            
             setupLocalVideo()
+            println("✅ Video local configurado")
+            
             joinChannel()
+            println("✅ Intentando unirse al canal...")
+            
         } catch (e: Exception) {
+            println("❌ ERROR en initializeEngine: ${e.message}")
             e.printStackTrace()
-            Toast.makeText(this, "Error inicializando videollamada", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Error inicializando videollamada: ${e.message}", Toast.LENGTH_LONG).show()
             finish()
         }
     }
 
     private val mRtcEventHandler = object : IRtcEngineEventHandler() {
         override fun onUserJoined(uid: Int, elapsed: Int) {
+            println("👥 Usuario se unió: $uid")
             runOnUiThread { setupRemoteVideo(uid) }
         }
 
         override fun onUserOffline(uid: Int, reason: Int) {
+            println("👋 Usuario se desconectó: $uid (razón: $reason)")
             runOnUiThread { 
                 remoteSurfaceView?.visibility = View.GONE
                 Toast.makeText(this@VideoCallActivity, "El usuario se desconectó", Toast.LENGTH_SHORT).show()
@@ -190,8 +208,23 @@ class VideoCallActivity : AppCompatActivity() {
 
         override fun onJoinChannelSuccess(channel: String?, uid: Int, elapsed: Int) {
             isJoined = true
+            println("🎉 ¡CONECTADO! Canal: $channel, UID: $uid")
             runOnUiThread {
                 Toast.makeText(this@VideoCallActivity, "Conectado a la videollamada", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        override fun onError(err: Int) {
+            println("❌ ERROR RTC: $err")
+            runOnUiThread {
+                Toast.makeText(this@VideoCallActivity, "Error en videollamada: $err", Toast.LENGTH_LONG).show()
+            }
+        }
+
+        override fun onConnectionLost() {
+            println("📡 Conexión perdida")
+            runOnUiThread {
+                Toast.makeText(this@VideoCallActivity, "Conexión perdida", Toast.LENGTH_SHORT).show()
             }
         }
     }

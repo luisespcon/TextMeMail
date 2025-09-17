@@ -44,6 +44,10 @@ fun ChatScreen(
     fun startVideoCall() {
         val currentUserUid = FirebaseAuth.getInstance().currentUser?.uid ?: return
         
+        println("🎥 INICIANDO VIDEOLLAMADA:")
+        println("   - Usuario actual: $currentUserUid")
+        println("   - Contacto UID: ${contact.uid}")
+        
         // Generar nombre de canal único y consistente
         val channelName = if (currentUserUid <= contact.uid) {
             "${currentUserUid}_${contact.uid}"
@@ -51,10 +55,14 @@ fun ChatScreen(
             "${contact.uid}_${currentUserUid}"
         }
         
+        println("   - Canal generado: $channelName")
+        
         val intent = Intent(context, VideoCallActivity::class.java).apply {
             putExtra("CHANNEL_NAME", channelName)
             putExtra("TOKEN", "") // Token vacío por ahora
         }
+        
+        println("   - Lanzando VideoCallActivity...")
         context.startActivity(intent)
     }
 
