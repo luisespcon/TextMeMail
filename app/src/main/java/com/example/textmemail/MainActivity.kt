@@ -120,72 +120,34 @@ class MainActivity : ComponentActivity() {
 
                     // Cargar usuarios válidos como contactos
                     db.collection("users").addSnapshotListener { snaps, error ->
-                        println("DEBUG CONTACTS: Listener activado - snaps=${snaps?.size()}, error=$error")
-                        
                         if (error != null) {
-                            println("DEBUG CONTACTS: ERROR en listener: ${error.message}")
+                            println("ERROR cargando contactos: ${error.message}")
                             return@addSnapshotListener
                         }
                         
                         if (snaps != null) {
-                            println("DEBUG CONTACTS: Total documentos encontrados: ${snaps.documents.size}")
-                            println("DEBUG CONTACTS: CurrentEmail para filtrar: $currentEmail")
+                            println("Total usuarios en BD: ${snaps.documents.size}")
                             
                             contacts = snaps.documents.mapNotNull { doc ->
                                 val email = doc.getString("email") ?: return@mapNotNull null
                                 val name = doc.getString("name") ?: ""
-                                val role = doc.getString("role") ?: "user"
-                                val createdAt = doc.getTimestamp("createdAt")
-                                val isEmailVerified = doc.getBoolean("isEmailVerified")
                                 
-                                println("DEBUG CONTACTS: Usuario encontrado - Email: $email, Name: $name, Role: $role, IsVerified: $isEmailVerified, CreatedAt: $createdAt")
-                                
-                                // Filtros para mostrar solo usuarios válidos:
-                                // 1. No mostrarse a sí mismo
-                                // 2. Debe tener email válido
-                                // 3. Debe tener un rol definido
-                                // 4. Debe tener un nombre válido (no vacío)
-                                // 5. No debe ser email de prueba
-                                // 6. Si el campo isEmailVerified existe, debe ser true
-                                //    Si no existe el campo, se considera válido (usuarios antiguos)
-                                val isVerified = isEmailVerified ?: true // null = usuario antiguo = válido
-                                
-                                // Filtros para excluir usuarios de prueba
-                                val isTestEmail = email.contains("prueba", ignoreCase = true) || 
-                                                 email.contains("test", ignoreCase = true) ||
-                                                 email.contains("demo", ignoreCase = true) ||
-                                                 name.contains("prueba", ignoreCase = true) ||
-                                                 name.contains("test", ignoreCase = true)
-                                
-                                val isCurrentUser = email == currentEmail
-                                val hasValidName = name.isNotBlank() && name.length > 1
-                                val hasValidEmail = email.isNotBlank() && email.contains("@")
-                                val hasValidRole = role.isNotBlank()
-                                
-                                println("DEBUG CONTACTS: Filtros - isCurrentUser: $isCurrentUser, hasValidName: $hasValidName, hasValidEmail: $hasValidEmail, hasValidRole: $hasValidRole, isVerified: $isVerified, isTestEmail: $isTestEmail")
-                                
-                                if (!isCurrentUser && 
-                                    hasValidEmail && 
-                                    hasValidRole &&
-                                    hasValidName &&
-                                    !isTestEmail &&
-                                    isVerified) {
-                                    
-                                    println("DEBUG CONTACTS: Usuario ACEPTADO como contacto: $email")
+                                // FILTRO SIMPLE: Solo excluir al usuario actual
+                                if (email != currentEmail && email.isNotBlank()) {
+                                    println("Contacto agregado: $name ($email)")
                                     Contact(
                                         uid = doc.id,
                                         name = name,
                                         email = email
                                     )
                                 } else {
-                                    println("DEBUG CONTACTS: Usuario RECHAZADO: $email - Razón: ${if (isCurrentUser) "es usuario actual" else if (!hasValidEmail) "email inválido" else if (!hasValidRole) "rol inválido" else if (!hasValidName) "nombre inválido" else if (isTestEmail) "es usuario de prueba" else if (!isVerified) "no verificado" else "unknown"}")
+                                    if (email == currentEmail) {
+                                        println("Usuario actual excluido: $email")
+                                    }
                                     null
                                 }
                             }
-                            println("DEBUG CONTACTS: Total contactos finales: ${contacts.size}")
-                            println("DEBUG CONTACTS: Lista contactos: ${contacts.map { "${it.name}(${it.email})" }}")
-                        } else {
-                            println("DEBUG CONTACTS: snaps es null")
+                            println("Total contactos mostrados: ${contacts.size}")
                         }
                     }
                 } else {
