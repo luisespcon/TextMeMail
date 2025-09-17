@@ -53,16 +53,25 @@ class VideoCallActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
+        // Obtener parámetros del intent ANTES de crear layout
+        channelName = intent.getStringExtra("CHANNEL_NAME") ?: run {
+            Toast.makeText(this, "Nombre de canal faltante", Toast.LENGTH_SHORT).show()
+            finish()
+            return
+        }
+        token = intent.getStringExtra("TOKEN") ?: ""
+        
         // Crear layout programáticamente
         setContentView(createVideoCallLayout())
         
-        // Obtener parámetros del intent
-        channelName = intent.getStringExtra("CHANNEL_NAME") ?: return finish()
-        token = intent.getStringExtra("TOKEN") ?: ""
+        println("📱 VideoCallActivity iniciada con canal: $channelName")
         
-        // Verificar permisos
+        // Verificar permisos DESPUÉS de configurar la UI
         if (checkSelfPermission()) {
-            initializeEngine()
+            // Delay pequeño para asegurar que la UI esté lista
+            window.decorView.post {
+                initializeEngine()
+            }
         }
     }
 
@@ -165,16 +174,29 @@ class VideoCallActivity : AppCompatActivity() {
             println("   - Channel: $channelName")
             println("   - Token: ${if (token.isEmpty()) "SIN TOKEN" else "CON TOKEN"}")
             
-            val config = RtcEngineConfig().apply {
-                mContext = baseContext
-                mAppId = appId
-                mEventHandler = mRtcEventHandler
+            // Verificar que el App ID no esté vacío
+            if (appId.isBlank()) {
+                throw Exception("App ID está vacío")
             }
             
-            println("✅ Config creado, inicializando RtcEngine...")
-            mRtcEngine = RtcEngine.create(config)
-            println("✅ RtcEngine creado")
+            // Crear configuración con try-catch específico
+            val config = RtcEngineConfig()
+            config.mContext = baseContext
+            config.mAppId = appId
+            config.mEventHandler = mRtcEventHandler
             
+            println("✅ Config creado, inicializando RtcEngine...")
+            
+            // Inicializar RtcEngine con manejo específico
+            try {
+                mRtcEngine = RtcEngine.create(config)
+                println("✅ RtcEngine creado exitosamente")
+            } catch (e: Exception) {
+                println("❌ Error específico creando RtcEngine: ${e.message}")
+                throw Exception("No se pudo crear RtcEngine: ${e.message}")
+            }
+            
+            // Configurar video
             mRtcEngine?.enableVideo()
             println("✅ Video habilitado")
             
@@ -187,7 +209,15 @@ class VideoCallActivity : AppCompatActivity() {
         } catch (e: Exception) {
             println("❌ ERROR en initializeEngine: ${e.message}")
             e.printStackTrace()
-            Toast.makeText(this, "Error inicializando videollamada: ${e.message}", Toast.LENGTH_LONG).show()
+            
+            val errorMessage = when {
+                e.message?.contains("101") == true -> "Error 101: Verifica tu App ID de Agora y conexión a internet"
+                e.message?.contains("110") == true -> "Token inválido o expirado"
+                e.message?.contains("2") == true -> "No tienes permisos de cámara/micrófono"
+                else -> "Error inicializando videollamada: ${e.message}"
+            }
+            
+            Toast.makeText(this, errorMessage, Toast.LENGTH_LONG).show()
             finish()
         }
     }
