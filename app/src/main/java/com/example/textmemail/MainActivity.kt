@@ -118,41 +118,39 @@ class MainActivity : ComponentActivity() {
                         currentRole = if (ok && !role.isNullOrBlank()) role!! else "user"
                     }
 
-                    // Cargar usuarios válidos como contactos
-                    db.collection("users").addSnapshotListener { snaps, error ->
-                        if (error != null) {
-                            println("ERROR cargando contactos: ${error.message}")
-                            return@addSnapshotListener
+                    // FORZAR CARGA DE TODOS LOS USUARIOS - SIN FILTROS
+                    println("CARGANDO TODOS LOS USUARIOS DE FIREBASE...")
+                    db.collection("users").get().addOnSuccessListener { querySnapshot ->
+                        println("RESPUESTA FIREBASE: ${querySnapshot.size()} documentos encontrados")
+                        
+                        val allContacts = mutableListOf<Contact>()
+                        
+                        for (document in querySnapshot.documents) {
+                            val email = document.getString("email") ?: ""
+                            val name = document.getString("name") ?: ""
+                            val uid = document.id
+                            
+                            println("PROCESANDO: uid=$uid, email=$email, name=$name")
+                            
+                            // SOLO excluir al usuario actual
+                            if (email != currentEmail) {
+                                allContacts.add(Contact(uid = uid, name = name, email = email))
+                                println("AGREGADO: $name ($email)")
+                            } else {
+                                println("EXCLUIDO (usuario actual): $email")
+                            }
                         }
                         
-                        if (snaps != null) {
-                            println("Total usuarios en BD: ${snaps.documents.size}")
-                            
-                            contacts = snaps.documents.mapNotNull { doc ->
-                                val email = doc.getString("email") ?: return@mapNotNull null
-                                val name = doc.getString("name") ?: ""
-                                
-                                // FILTRO SIMPLE: Solo excluir al usuario actual
-                                if (email != currentEmail && email.isNotBlank()) {
-                                    println("Contacto agregado: $name ($email)")
-                                    Contact(
-                                        uid = doc.id,
-                                        name = name,
-                                        email = email
-                                    )
-                                } else {
-                                    if (email == currentEmail) {
-                                        println("Usuario actual excluido: $email")
-                                    }
-                                    null
-                                }
-                            }
-                            println("Total contactos mostrados: ${contacts.size}")
-                        }
+                        contacts = allContacts
+                        println("TOTAL CONTACTOS FINALES: ${contacts.size}")
+                        contacts.forEach { println("- ${it.name} (${it.email})") }
+                        
+                    }.addOnFailureListener { exception ->
+                        println("ERROR CARGANDO FIREBASE: ${exception.message}")
                     }
                 } else {
                     currentRole = "user"
-                    contacts = emptyList() // Limpiar contactos si no está verificado
+                    contacts = emptyList()
                 }
             }
 
