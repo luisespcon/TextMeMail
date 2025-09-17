@@ -212,7 +212,7 @@ class VideoCallActivity : AppCompatActivity() {
             
             val errorMessage = when {
                 e.message?.contains("101") == true -> "Error 101: Verifica tu App ID de Agora y conexión a internet"
-                e.message?.contains("110") == true -> "Token inválido o expirado"
+                e.message?.contains("110") == true -> "Error 110: Token requerido. Cambia tu proyecto Agora a 'Testing Mode' en console.agora.io"
                 e.message?.contains("2") == true -> "No tienes permisos de cámara/micrófono"
                 else -> "Error inicializando videollamada: ${e.message}"
             }
@@ -246,8 +246,14 @@ class VideoCallActivity : AppCompatActivity() {
 
         override fun onError(err: Int) {
             println("❌ ERROR RTC: $err")
+            val errorMessage = when (err) {
+                101 -> "Error 101: App ID inválido"
+                110 -> "Error 110: Token requerido. Cambia tu proyecto Agora a 'Testing Mode'"
+                2 -> "Error 2: Permisos de cámara/micrófono denegados"
+                else -> "Error RTC: $err"
+            }
             runOnUiThread {
-                Toast.makeText(this@VideoCallActivity, "Error en videollamada: $err", Toast.LENGTH_LONG).show()
+                Toast.makeText(this@VideoCallActivity, errorMessage, Toast.LENGTH_LONG).show()
             }
         }
 
@@ -278,6 +284,12 @@ class VideoCallActivity : AppCompatActivity() {
             channelProfile = Constants.CHANNEL_PROFILE_COMMUNICATION
             clientRoleType = Constants.CLIENT_ROLE_BROADCASTER
         }
+        
+        println("🔐 Unirse al canal:")
+        println("   - Canal: $channelName")
+        println("   - Token: ${if (token.isEmpty()) "SIN TOKEN" else "CON TOKEN VÁLIDO"}")
+        println("   - UID: $uid")
+        
         mRtcEngine?.joinChannel(token, channelName, uid, options)
     }
 
