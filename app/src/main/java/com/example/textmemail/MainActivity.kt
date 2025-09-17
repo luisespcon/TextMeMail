@@ -103,50 +103,28 @@ class MainActivity : ComponentActivity() {
 
             // Si ya está logueado y verificado, trae el rol y los usuarios
             LaunchedEffect(isLoggedIn, isVerified) {
-                println("DEBUG MAIN: isLoggedIn=$isLoggedIn, isVerified=$isVerified, currentEmail=$currentEmail")
-                
                 if (isLoggedIn && isVerified) {
-                    println("DEBUG MAIN: Usuario logueado y verificado, iniciando carga de datos...")
-                    
-                    // Migrar usuario si es necesario
-                    emailAuth.migrateExistingUser { ok, msg -> 
-                        println("DEBUG MAIN: Migración usuario - ok=$ok, msg=$msg")
-                    }
-                    
-                    emailAuth.getCurrentUserRole { ok, role, msg ->
-                        println("DEBUG MAIN: Rol obtenido - ok=$ok, role=$role, msg=$msg")
+                    emailAuth.getCurrentUserRole { ok, role, _ ->
                         currentRole = if (ok && !role.isNullOrBlank()) role!! else "user"
                     }
 
-                    // FORZAR CARGA DE TODOS LOS USUARIOS - SIN FILTROS
-                    println("CARGANDO TODOS LOS USUARIOS DE FIREBASE...")
-                    db.collection("users").get().addOnSuccessListener { querySnapshot ->
-                        println("RESPUESTA FIREBASE: ${querySnapshot.size()} documentos encontrados")
-                        
-                        val allContacts = mutableListOf<Contact>()
-                        
-                        for (document in querySnapshot.documents) {
-                            val email = document.getString("email") ?: ""
-                            val name = document.getString("name") ?: ""
-                            val uid = document.id
-                            
-                            println("PROCESANDO: uid=$uid, email=$email, name=$name")
-                            
-                            // SOLO excluir al usuario actual
-                            if (email != currentEmail) {
-                                allContacts.add(Contact(uid = uid, name = name, email = email))
-                                println("AGREGADO: $name ($email)")
-                            } else {
-                                println("EXCLUIDO (usuario actual): $email")
+                    // CARGAR TODOS LOS USUARIOS - VERSIÓN SIMPLE QUE FUNCIONABA
+                    db.collection("users").addSnapshotListener { snaps, _ ->
+                        if (snaps != null) {
+                            contacts = snaps.documents.mapNotNull { doc ->
+                                val email = doc.getString("email")
+                                val name = doc.getString("name") ?: ""
+                                
+                                // SIN FILTROS - Todos los usuarios con email válido
+                                if (!email.isNullOrBlank()) {
+                                    Contact(
+                                        uid = doc.id,
+                                        name = name,
+                                        email = email
+                                    )
+                                } else null
                             }
                         }
-                        
-                        contacts = allContacts
-                        println("TOTAL CONTACTOS FINALES: ${contacts.size}")
-                        contacts.forEach { println("- ${it.name} (${it.email})") }
-                        
-                    }.addOnFailureListener { exception ->
-                        println("ERROR CARGANDO FIREBASE: ${exception.message}")
                     }
                 } else {
                     currentRole = "user"
