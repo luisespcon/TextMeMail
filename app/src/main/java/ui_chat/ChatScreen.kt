@@ -59,7 +59,7 @@ fun ChatScreen(
         
         val intent = Intent(context, VideoCallActivity::class.java).apply {
             putExtra("CHANNEL_NAME", channelName)
-            putExtra("TOKEN", "aa74907229964affb0dd429a555c2412") // Token válido de Agora
+            putExtra("TOKEN", "") // Sin token - proyecto en modo test
         }
         
         println("   - Lanzando VideoCallActivity...")

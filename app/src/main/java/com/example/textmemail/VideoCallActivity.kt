@@ -17,8 +17,8 @@ import io.agora.rtc2.video.VideoCanvas
 
 class VideoCallActivity : AppCompatActivity() {
 
-    // Tu App ID de Agora
-    private val appId = "4d4ecc5bd1674f59bd295482c9546750"
+    // Tu App ID de Agora (Proyecto en modo test)
+    private val appId = "eb24147f88d746ff8e767dc668b65203"
     
     // Views
     private lateinit var localContainer: FrameLayout
@@ -285,12 +285,15 @@ class VideoCallActivity : AppCompatActivity() {
             clientRoleType = Constants.CLIENT_ROLE_BROADCASTER
         }
         
+        // En modo test, usar null para el token
+        val tokenToUse = if (token.isEmpty()) null else token
+        
         println("🔐 Unirse al canal:")
         println("   - Canal: $channelName")
-        println("   - Token: ${if (token.isEmpty()) "SIN TOKEN" else "CON TOKEN VÁLIDO"}")
+        println("   - Token: ${if (tokenToUse == null) "SIN TOKEN (modo test)" else "CON TOKEN"}")
         println("   - UID: $uid")
         
-        mRtcEngine?.joinChannel(token, channelName, uid, options)
+        mRtcEngine?.joinChannel(tokenToUse, channelName, uid, options)
     }
 
     private fun toggleMute() {
